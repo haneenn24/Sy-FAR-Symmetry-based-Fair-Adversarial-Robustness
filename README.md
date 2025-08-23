@@ -1,89 +1,75 @@
-# Sy-FAR-Symmetry-based-Fair-Adversarial-Robustness
-This repository provides the official implementation of Sy-FAR, a novel training framework designed to improve adversarial robustness while ensuring fairness across classes
+Here’s an updated, repo-accurate `README.md` you can drop in as-is.
+
+---
+
 # Sy-FAR: Symmetry-based Fair Adversarial Robustness
 
-Sy-FAR is a training/evaluation toolkit for **fair** and **robust** image classification. It combines:
+This repository provides the official implementation of **Sy-FAR**, a training and evaluation toolkit for **fair** and **robust** image classification. Sy-FAR couples:
 
 * a **symmetry regularizer** that penalizes asymmetric confusions between classes,
-* **ROA** (Rectangular Occlusion Attack) adversarial training in the pixel domain,
+* **ROA** (Rectangular Occlusion Attack)–based adversarial training,
 * optional **FAAL** (KL-DRO) class reweighting,
-* clean, modular code with CLIs for standard training, ViT/VGG/ResNet backbones, AutoAttack evaluation, randomized smoothing tests, and rich fairness/robustness metrics & visualizations.
+* clean, modular code with CLIs for standard and adversarial training, VGG/ResNet/ViT backbones, AutoAttack evaluation, randomized smoothing tests, and rich fairness/robustness metrics & visualizations.
 
 ---
 
-## Highlights
-
-* **Symmetry penalty (Sy-FAR):** minimizes gaps $|\text{cm}_{i,j}-\text{cm}_{j,i}|$ on the adversarial confusion matrix to reduce group/class disparities.
-* **Physical-ish adversaries (ROA):** search + constrained PGD over rectangles in input pixels (optionally targeted), compatible with VGG-Face mean.
-* **Fair reweighting (FAAL):** plug-in KL-divergence DRO to emphasize hard or under-served classes.
-* **Batteries included:** AutoAttack, randomized smoothing against “glasses” & “patch” attacks, rich metrics, heatmaps with example faces.
-
----
-
-## Repository structure (suggested)
+## Repository structure
 
 ```
 .
-├─ models/
-│  ├─ vgg16.py           # VGG-16 (VGG-Face convs + flexible FC; e2e or head-only; multiple inits)
-│  ├─ resnet.py          # ResNet{18,34,50,…}
-│  └─ vit.py             # ViT via timm (vit_base_patch16_224)
-│
-├─ utils/
-│  ├─ data_process.py    # dataset transforms & dataloaders (edit data_dir)
-│  ├─ carlini_wagner.py  # CW margin loss
-│  └─ faal.py            # FAAL KL-DRO weights (optional)
-│
 ├─ attacks/
-│  ├─ glass_attack.py            # eyeglass-frame attack (digit/pixel space)
-│  ├─ smooth_glassattack.py      # smoothed classifier + glasses
-│  ├─ smooth_patch.py            # smoothed classifier + learned patch
-│  ├─ sticker_attack.py          # ROA baseline (script)
-│  └─ roa.py                     # ROA library (search + cPGD, normalized domain)
+│  ├─ autoattack.py           # AutoAttack evaluation (CIFAR-10/100)
+│  ├─ glass_attack.py         # eyeglass-frame attack
+│  ├─ smooth_glassattack.py   # randomized smoothing vs glasses
+│  ├─ smooth_patch.py         # randomized smoothing vs learned patch
+│  └─ sticker_attack.py       # ROA as a standalone attack script
+│
+├─ datasets/                  # (placeholder) put dataset helpers or symlinks here
+│  └─ __init__.py
 │
 ├─ defenses/
-│  ├─ standard_train.py          # standard ERM training (clean)
-│  ├─ specnorm.py                # spectral-norm flavored training loop
-│  ├─ roa_adv_train.py           # adversarial training via ROA
-│  └─ syfar_train.py             # **Sy-FAR** (clean + ROA + symmetry penalty [+ FAAL])
+│  ├─ PGD.py                  # PGD utilities (training/eval helpers)
+│  └─ ROA.py                  # ROA-based adversarial training loop (targeted option)
 │
 ├─ evaluation/
-│  ├─ origin_test.py             # clean accuracy
-│  ├─ autoattack.py              # AutoAttack evaluation on CIFAR-10/100
-│  ├─ metrics_all.py             # fairness/robustness metrics from a confusion matrix
-│  └─ plot_visual_metrics.py     # heatmaps + candidate images strip
+│  ├─ metrics_report.py       # compute fairness/robustness metrics from a CM
+│  └─ test_clean_accuracy.py  # clean test accuracy for a saved model
 │
+├─ models/
+│  ├─ resnet.py               # ResNet{18,34,50,…}
+│  ├─ vgg16.py                # VGG-Face convs + flexible FC; e2e/head-only; multiple inits
+│  └─ vit.py                  # ViT via timm ('vit_base_patch16_224')
+│
+├─ pretrained_models/
+│  └─ __init__.py             # place VGG_FACE.t7 here (or pass its path explicitly)
+│
+├─ training_schemes/
+│  ├─ baselines/              # room for additional baselines
+│  ├─ adversarial.py          # adversarial training (ROA baseline)
+│  ├─ standard.py             # standard ERM training
+│  └─ syfar.py                # Sy-FAR: clean + ROA + symmetry penalty (+ optional FAAL)
+│
+├─ utils/
+│  ├─ carlini_wagner.py       # CW margin losses
+│  ├─ data_process.py         # dataset transforms & dataloaders (edit data_dir)
+│  ├─ plot_visual_metrics.py  # heatmaps + exemplar strips
+│  └─ __init__.py
+│
+├─ README.md
+├─ LICENSE.md
 └─ requirements.txt
 ```
-
-> Some filenames above reflect the refactors we discussed. If your local names differ, keep the README examples consistent with your actual file paths.
-
 ---
 
-## Setup
+## Installation
 
-**Python:** 3.8.5+
-**CUDA (example):** Torch 2.2.2 + cu118 (as pinned)
-
-```bash
-# 1) Create env
-conda create -n syfar python=3.8 -y
+conda create -n syfar python -y
 conda activate syfar
-
-# 2) Install deps
 pip install -r requirements.txt
-```
-
-**Extra model files**
-
-* VGG-Face weights (`VGG_FACE.t7`) required if you call `VGG_16.load_weights(...)`.
-
-  * Place it where your `models/vgg16.py` expects it, or pass a path to `load_weights(path=...)`.
 
 **Dataset**
 
-* We used a PubFig-10–style split (and a “siblings” mix in some experiments).
-* Edit `utils/data_process.py` to point `data_dir` to your dataset root structured as:
+* We use an ImageFolder-style layout. Update `data_dir` in `utils/data_process.py`:
 
   ```
   <DATA_DIR>/
@@ -99,32 +85,29 @@ pip install -r requirements.txt
 ### 1) Standard training (clean ERM)
 
 ```bash
-python defenses/standard_train.py \
+python training_schemes/standard.py \
   --batch-size 8 --epochs 25 --lr 1e-3 --opt sgd --step-size 7 --gamma 0.1
 ```
 
 ### 2) Sy-FAR training (ours)
 
 ```bash
-python defenses/syfar_train.py \
+python training_schemes/syfar.py \
   --batch-size 8 --epochs 5 --lr 1e-3 \
-  --loss carlini_wagner \
   --clean-weight 0.1 --adv-weight 10 --sym-weight 10 --epsilon 0.1 \
   --alpha 20 --iters 100 --width 70 --height 70 --xskip 10 --yskip 10 \
   --out-dir runs/syfar --tag pubfig_vgg16
 ```
 
-Optional FAAL reweighting:
+*Notes:*
 
-```bash
-python defenses/syfar_train.py \
-  ... --use-faal --faal-radius 0.1
-```
+* The symmetry penalty is computed from the adversarial confusion matrix within each batch.
+* FAAL (KL-DRO) class reweighting is available in the codebase; enable it if your run script exposes the flags.
 
 ### 3) Adversarial training via ROA (baseline)
 
 ```bash
-python defenses/roa_adv_train.py \
+python training_schemes/adversarial.py \
   --batch-size 8 --epochs 5 --lr 1e-3 \
   --alpha 20 --iters 100 --width 70 --height 70 --xskip 10 --yskip 10
 ```
@@ -132,86 +115,98 @@ python defenses/roa_adv_train.py \
 ### 4) Evaluate clean accuracy
 
 ```bash
-python evaluation/origin_test.py \
+python evaluation/test_clean_accuracy.py \
   --model-path path/to/model.pt
 ```
 
 ### 5) AutoAttack (CIFAR-10/100)
 
 ```bash
-python evaluation/autoattack.py \
+python attacks/autoattack.py \
   --data-dir ./cifar-data --batch-size 200 \
   --model WRN --pre-trained MART --model-name best \
   --epsilon 8 --normalization 01
 ```
 
-### 6) Randomized smoothing vs glasses
+### 6) Randomized smoothing vs glasses/patch
 
 ```bash
-python attacks/smooth_glassattack.py my_gaussian_model.pt \
-  -sigma 1.0 -outfile out_glass.txt --batch 32 --N 1000 --alpha 0.001
+python attacks/smooth_glassattack.py gaussian_model.pt -sigma 1.0 -outfile out_glass.txt --batch 32 --N 1000 --alpha 0.001
+python attacks/smooth_patch.py gaussian_model.pt -sigma 1.0
 ```
 
 ### 7) Visualize fairness/robustness
 
 ```bash
-python evaluation/plot_visual_metrics.py
-# saves: *_full_heatmap.png, *_upper_triangle_diff.png, *_upper_triangle_absdiff.png
+python utils/plot_visual_metrics.py
+# writes: *_full_heatmap.png, *_upper_triangle_diff.png, *_upper_triangle_absdiff.png
 ```
 
 ---
 
-## VGG-16 training modes & inits
+## Backbones
 
-`models/vgg16.py` exposes knobs to control training and initialization of the final layer(s).
+* **VGG-16** (`models/vgg16.py`): VGG-Face conv stacks + custom FC head(s).
+  Options include:
 
-* **Training mode:** end-to-end vs. head-only (freeze convs)
-* **Init:** `xavier_uniform`, `xavier_normal`, `kaiming_uniform`, `kaiming_normal`, `trunc_normal`, etc.
-
-Example (inside your script):
-
-```python
-from models.vgg16 import VGG_16
-
-model = VGG_16(
-    num_classes=10,
-    train_mode="e2e",               # or "head_only"
-    head_init="xavier_uniform",     # or "kaiming_normal", ...
-)
-# Optionally load VGG-Face conv weights
-model.load_weights(path="path/to/VGG_FACE.t7")
-```
+  * training mode: end-to-end or head-only,
+  * several head initializations (xavier/kaiming/trunc. normal, etc.).
+* **ResNet** (`models/resnet.py`): ResNet18/34/50 variants.
+* **ViT** (`models/vit.py`): `timm.create_model('vit_base_patch16_224', pretrained=True)`.
 
 ---
 
 ## Metrics & fairness
 
-We provide utilities to compute:
+We provide:
 
-* **Robust accuracy** (overall, per-class)
-* **Subgroup Robust Accuracy (SRA)**, **Robustness Disparity (RD)**
-* **Target-perspective misclassification shares** and gaps
-* **Max asymmetry gap**: $\max_{i<j} |\text{cm}_{i,j}-\text{cm}_{j,i}|$
-* **Symmetry penalty** used in training
+* **Robust accuracy** (overall and per-class),
+* **Subgroup Robust Accuracy (SRA)** and **Robustness Disparity (RD)**,
+* **Target-side misclassification shares** and gaps,
+* **Max asymmetry gap:** $\max_{i<j} |\mathrm{cm}_{i,j} - \mathrm{cm}_{j,i}|$,
+* The **symmetry penalty** used during training.
 
-See `evaluation/metrics_all.py` and the plotting script for heatmaps + exemplar strips.
+See `evaluation/metrics_report.py` and `utils/plot_visual_metrics.py`.
+
+---
+
+## Pretrained Models (quick use)
+
+**Provided:**
+- `pretrained_models/vgg16_pubfig.pt`
+- `pretrained_models/vgg16_pubfig_siblings.pt`
+
+**Evaluate clean accuracy:**
+```bash
+python evaluation/test_clean_accuracy.py --model-path pretrained_models/vgg16_pubfig.pt
+# or
+python evaluation/test_clean_accuracy.py --model-path pretrained_models/vgg16_pubfig_siblings.pt
+````
+
+**Evaluate under glasses attack:**
+
+```bash
+python attacks/glass_attack.py --model-path pretrained_models/vgg16_pubfig.pt
+# or
+python attacks/glass_attack.py --model-path pretrained_models/vgg16_pubfig_siblings.pt
+```
 
 ---
 
 ## Reproducibility
 
-* We set seeds and enable deterministic flags where viable.
-* Use `--seed` on training scripts.
-* GPUs and cudnn settings may still cause slight nondeterminism in some ops.
+* Seeds are set and deterministic options enabled where feasible.
+* Some CUDA/cuDNN ops may remain nondeterministic; report seeds and versions in experiments.
 
 ---
 
-## Tips / Troubleshooting
+## Requirements (high level)
 
-* **cvxpy / FAAL:** If you enable `--use-faal`, make sure the solvers in `requirements.txt` are installed. `mosek` is optional and requires a license; otherwise ECOS/SCS are used.
-* **Data path:** If you see “file not found” in dataloaders, edit `utils/data_process.py` to your dataset root.
-* **VGG-Face weights:** If `load_weights` fails, check path and Torch/Lua tensor ordering; we copy conv weights only.
-* **CUDA version:** Match your local CUDA to the pinned PyTorch wheels (we used cu118 in `requirements.txt`).
+Pinned in `requirements.txt`. Additional packages used by this repo include:
+
+* `timm` (ViT), `autoattack`, `robustbench`, `torchattacks`,
+* `cvxpy` + solvers `ecos`, `scs` (and optional `mosek` if you have a license)
 
 ## Contact
-Questions, issues, or contributions are welcome. Please open a GitHub issue or pull request.
+
+Questions, issues, or contributions are welcome—please open a GitHub issue or pull request.
