@@ -1,7 +1,3 @@
-Here’s an updated, repo-accurate `README.md` you can drop in as-is.
-
----
-
 # Sy-FAR: Symmetry-based Fair Adversarial Robustness
 
 This repository provides the official implementation of **Sy-FAR**, a training and evaluation toolkit for **fair** and **robust** image classification. Sy-FAR couples:
