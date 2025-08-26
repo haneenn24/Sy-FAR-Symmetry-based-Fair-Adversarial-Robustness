@@ -205,16 +205,15 @@ python getpubfig.py      # downloads into ./images by default
 
 Save as `classes.txt` (one per line) and use to subset your dataset:
 
-AntonioBanderas
-ColinPowell
-HughGrant
-JenniferLopez
-JohnTravolta
-MerylStreep
-OprahWinfrey
-ReeseWitherspoon
-TyraBanks
-WillSmith
+**Subnote:** “siblings” identities (optional)
+
+If you want sibling pairs, you can source additional identities from VGGFace/VGGFace2 and then run the same preprocessing:
+
+VGGFace2 info page: https://www.robots.ox.ac.uk/~vgg/data/vgg_face2/
+
+Original VGG Face page: https://www.robots.ox.ac.uk/~vgg/software/vgg_face/
+
+(Obtain images per the dataset’s instructions/terms, align & crop with your pipeline, and add the classes to your classes.txt.)
 
 ---
 
