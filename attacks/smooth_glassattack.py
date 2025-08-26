@@ -4,9 +4,6 @@
 """
 Randomized Smoothing against Eyeglass Attack
 
-Based on: https://github.com/locuslab/smoothing
-Original authors: Jeremy Cohen, Elan Rosenfeld, Zico Kolter
-
 This script evaluates randomized smoothing certification under the eyeglass-frame attack.
 
 Usage

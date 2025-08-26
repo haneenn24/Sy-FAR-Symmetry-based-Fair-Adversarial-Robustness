@@ -4,10 +4,6 @@
 """
 Sy-FAR / Eyeglass Frame Attack (untargeted, digit-space, fixed mask)
 
-Original reference (pytorch port): https://github.com/mahmoods01/accessorize-to-a-crime
-This script performs an eyeglass-frame adversarial attack and evaluates robustness,
-including confusion matrix and per-class accuracy, with optional adversarial image saving.
-
 Usage
 -----
 python glass_attack.py \

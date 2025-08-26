@@ -4,12 +4,6 @@
 """
 PGD & Evaluation Utilities (CIFAR-10)
 
-Refactored from https://github.com/P2333/Bag-of-Tricks-for-AT
-- Device-safe normalization (no CUDA tensors in defaults)
-- Modular attacks (PGD, TRADES-style attack)
-- Standard / PGD / fairness-aware PGD evaluations
-- CLI for quick runs
-
 Example
 -------
 # Standard accuracy
