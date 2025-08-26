@@ -20,9 +20,6 @@ This repository provides the official implementation of **Sy-FAR**, a training a
 │  ├─ smooth_patch.py         # randomized smoothing vs learned patch
 │  └─ sticker_attack.py       # ROA as a standalone attack script
 │
-├─ datasets/                  # (placeholder) put dataset helpers or symlinks here
-│  └─ __init__.py
-│
 ├─ defenses/
 │  ├─ PGD.py                  # PGD utilities (training/eval helpers)
 │  └─ ROA.py                  # ROA-based adversarial training loop (targeted option)
@@ -48,6 +45,7 @@ This repository provides the official implementation of **Sy-FAR**, a training a
 ├─ utils/
 │  ├─ carlini_wagner.py       # CW margin losses
 │  ├─ data_process.py         # dataset transforms & dataloaders (edit data_dir)
+│  ├─ dataset_preprocess.py   # dataset_preprocess crop, alignment etc.
 │  ├─ plot_visual_metrics.py  # heatmaps + exemplar strips
 │  └─ __init__.py
 │
@@ -62,19 +60,6 @@ This repository provides the official implementation of **Sy-FAR**, a training a
 conda create -n syfar python -y
 conda activate syfar
 pip install -r requirements.txt
-
-**Dataset**
-
-* We use an ImageFolder-style layout. Update `data_dir` in `utils/data_process.py`:
-
-  ```
-  <DATA_DIR>/
-    train/<class_name>/*.jpg
-    val/<class_name>/*.jpg
-    test/<class_name>/*.jpg
-  ```
-
----
 
 ## Quickstart
 
@@ -166,25 +151,17 @@ See `evaluation/metrics_report.py` and `utils/plot_visual_metrics.py`.
 
 ---
 
-## Pretrained Models (quick use)
+## Evaluate (use your own checkpoint)
 
-**Provided:**
-- `pretrained_models/vgg16_pubfig.pt`
-- `pretrained_models/vgg16_pubfig_siblings.pt`
-
-**Evaluate clean accuracy:**
+**Clean accuracy**
 ```bash
-python evaluation/test_clean_accuracy.py --model-path pretrained_models/vgg16_pubfig.pt
-# or
-python evaluation/test_clean_accuracy.py --model-path pretrained_models/vgg16_pubfig_siblings.pt
+python evaluation/test_clean_accuracy.py --model-path <PATH_TO_YOUR_MODEL>.pt
 ````
 
-**Evaluate under glasses attack:**
+**Glasses attack**
 
 ```bash
-python attacks/glass_attack.py --model-path pretrained_models/vgg16_pubfig.pt
-# or
-python attacks/glass_attack.py --model-path pretrained_models/vgg16_pubfig_siblings.pt
+python attacks/glass_attack.py --model-path <PATH_TO_YOUR_MODEL>.pt
 ```
 
 ---
@@ -202,6 +179,117 @@ Pinned in `requirements.txt`. Additional packages used by this repo include:
 
 * `timm` (ViT), `autoattack`, `robustbench`, `torchattacks`,
 * `cvxpy` + solvers `ecos`, `scs` (and optional `mosek` if you have a license)
+
+---
+## Dataset: PubFig (setup & preprocessing)
+
+### 1) Download PubFig
+PubFig is released as **URL lists** (not images). Get the official files from Columbia CAVE:
+- Homepage: <https://www.cs.columbia.edu/CAVE/databases/pubfig/>
+- Download page (URL lists + metadata): <https://www.cs.columbia.edu/CAVE/databases/pubfig/download/>
+
+Optional helper to fetch images from the URL lists:
+- `getpubfig`: <https://github.com/dimatura/getpubfig>
+
+```bash
+# Example using getpubfig
+git clone https://github.com/dimatura/getpubfig.git
+cd getpubfig
+# place the official dev_urls.txt / eval_urls.txt in this folder
+python getpubfig.py      # downloads into ./images by default
+````
+
+> If you curate a **PubFig-10** subset, create `classes.txt` (10 identities) and only keep those folders.
+
+### PubFig-10 class list (used in this repo)
+
+Save as `classes.txt` (one per line) and use to subset your dataset:
+
+AntonioBanderas
+ColinPowell
+HughGrant
+JenniferLopez
+JohnTravolta
+MerylStreep
+OprahWinfrey
+ReeseWitherspoon
+TyraBanks
+WillSmith
+
+---
+
+### 2) Preprocess (detect → align → crop)
+
+
+Use **FaceX-Zoo** for ArcFace-style alignment/cropping:
+
+```bash
+# Clone the SDK once
+git clone https://github.com/JDAI-CV/FaceX-Zoo.git
+export PYTHONPATH="$PWD/FaceX-Zoo:$PYTHONPATH"   # make SDK importable
+````
+
+Now run our wrapper (choose one):
+
+```bash
+# A) Direct Python call
+python preprocess/crop_lfw_edited_by_arcface.py \
+  --lfw_edited_root /path/to/pubfig/images \
+  --lfw_lms_file   /path/to/landmarks.txt \
+  --target_folder  /path/to/PubFig_cropped
+```
+
+```bash
+# B) Shell wrapper
+bash preprocess/crop_images.sh \
+  RAW_IMG_DIR=/path/to/pubfig/images \
+  LANDMARKS=/path/to/landmarks.txt \
+  OUT_DIR=/path/to/PubFig_cropped
+```
+
+---
+
+### 3) Split & layout (ImageFolder)
+
+Organize cropped images as:
+
+```
+<DATA_DIR>/
+  train/<class_name>/*.jpg
+  val/<class_name>/*.jpg
+  test/<class_name>/*.jpg
+```
+
+> Set this path in `utils/data_process.py` (`data_dir`).
+
+---
+
+### 4) Normalization (match our code)
+
+We use VGG-Face–style normalization:
+
+```python
+# utils/data_process.py
+mean = [0.367035294117647, 0.41083294117647057, 0.5066129411764705]
+std  = [1/255, 1/255, 1/255]
+transforms.Normalize(mean, std)
+```
+
+Some attack scripts also subtract classic VGG-Face **BGR** means in pixel space:
+`[129.1863, 104.7624, 93.5940]`.
+
+---
+
+### 5) Quick check
+
+* Ensure every class in `classes.txt` appears under `train/val/test`.
+* Sanity run:
+
+```bash
+python evaluation/origin_test.py --model-path <PATH_TO_YOUR_MODEL>.pt
+```
+---
+
 
 ## Contact
 
