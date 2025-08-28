@@ -6,8 +6,6 @@ Evaluate robustness with AutoAttack on CIFAR-10.
 
 Notes
 -----
-- Avoid naming this script 'autoattack.py' to prevent shadowing the PyPI package 'autoattack'.
-  Prefer 'eval_autoattack.py'. If not, this script will warn you at runtime.
 - Normalization is handled via a lightweight `Normalize` module placed in front of the model.
 """
 
