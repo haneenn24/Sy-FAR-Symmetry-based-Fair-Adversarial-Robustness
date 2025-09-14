@@ -293,3 +293,20 @@ python evaluation/origin_test.py --model-path <PATH_TO_YOUR_MODEL>.pt
 ## Contact
 
 Questions, issues, or contributions are welcome—please open a GitHub issue or pull request.
+
+
+
+---
+
+## Citation
+
+If you find this repository useful in your research, please cite:
+
+```bibtex
+@article{najjar2025syfar,
+    author  = {Najjar, Haneen and Ronen, Eyal and Sharif, Mahmood},
+    title   = {{Sy-FAR}: {S}ymmetry-based Fair Adversarial Robustness},
+    year    = {2025},
+    journal = {arXiv preprint}
+}
+
