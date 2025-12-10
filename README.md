@@ -45,7 +45,6 @@ This repository provides the official implementation of **Sy-FAR**, a training a
 ├─ utils/
 │  ├─ carlini_wagner.py       # CW margin losses
 │  ├─ data_process.py         # dataset transforms & dataloaders (edit data_dir)
-│  ├─ dataset_preprocess.py   # dataset_preprocess crop, alignment etc.
 │  ├─ plot_visual_metrics.py  # heatmaps + exemplar strips
 │  └─ __init__.py
 │
@@ -151,7 +150,7 @@ See `evaluation/metrics_report.py` and `utils/plot_visual_metrics.py`.
 
 ---
 
-## Evaluate (use your own checkpoint)
+## Evaluate
 
 **Clean accuracy**
 ```bash
@@ -166,19 +165,16 @@ python attacks/glass_attack.py --model-path <PATH_TO_YOUR_MODEL>.pt
 
 ---
 
-## Reproducibility
+## Requirements (High-Level Overview)
 
-* Seeds are set and deterministic options enabled where feasible.
-* Some CUDA/cuDNN ops may remain nondeterministic; report seeds and versions in experiments.
+All dependencies are pinned in `requirements.txt`.  
+This repository additionally uses several commonly adopted packages for vision models, adversarial evaluation, and robust optimization:
 
----
+- **timm** — Vision Transformer (ViT) models  
+- **autoattack**, **robustbench**, **torchattacks** — standard adversarial evaluation libraries  
+- **cvxpy** with open-source solvers **ECOS** and **SCS** for the FAAL reweighting module  
 
-## Requirements (high level)
-
-Pinned in `requirements.txt`. Additional packages used by this repo include:
-
-* `timm` (ViT), `autoattack`, `robustbench`, `torchattacks`,
-* `cvxpy` + solvers `ecos`, `scs` (and optional `mosek` if you have a license)
+All components are installable directly via `pip`, and no proprietary solvers are required.
 
 ---
 ## Dataset: PubFig (setup & preprocessing)
@@ -226,9 +222,10 @@ Use **FaceX-Zoo** for ArcFace-style alignment/cropping:
 # Clone the SDK once
 git clone https://github.com/JDAI-CV/FaceX-Zoo.git
 export PYTHONPATH="$PWD/FaceX-Zoo:$PYTHONPATH"   # make SDK importable
+git checkout 16b793a7564a4b9308cf94e62bdb2ffacb3a725a
 ````
 
-Now run our wrapper (choose one):
+Now run our wrapper:
 
 ```bash
 # A) Direct Python call
@@ -278,17 +275,6 @@ Some attack scripts also subtract classic VGG-Face **BGR** means in pixel space:
 `[129.1863, 104.7624, 93.5940]`.
 
 ---
-
-### 5) Quick check
-
-* Ensure every class in `classes.txt` appears under `train/val/test`.
-* Sanity run:
-
-```bash
-python evaluation/origin_test.py --model-path <PATH_TO_YOUR_MODEL>.pt
-```
----
-
 
 ## Contact
 

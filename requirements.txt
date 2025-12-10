@@ -12,10 +12,9 @@ python-dateutil==2.9.*
 pytz==2024.*
 statsmodels==0.14.*
 typing_extensions>=4.8
-opencv-python==4.10.\*
+opencv-python==4.10.*
 tqdm==4.66.*
 scikit-learn==1.4.*
-
 
 # --- Deep learning stack ---
 torch==2.2.2+cu118
@@ -23,7 +22,6 @@ torchvision==0.17.2
 torchaudio==2.2.2
 torchfile==0.1.*
 --extra-index-url https://download.pytorch.org/whl/cu118
-
 
 # --- Vision / models ---
 timm==1.0.*
@@ -37,4 +35,3 @@ torchattacks==3.5.*
 cvxpy==1.5.*
 ecos==2.0.*
 scs==3.2.*
-mosek==10.*  # optional; needs a license
