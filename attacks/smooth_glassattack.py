@@ -10,7 +10,7 @@ Usage
 -----
 python smooth_glassattack.py \
   --model-checkpoint ./checkpoints/model.pt \
-  --glass-mask-path ./glass/Experiment/dataprepare/silhouette.png \
+  --glass-mask-path ./attacks/dataprepare/silhouette.png \
   --sigma 1.0 \
   --outfile output.tsv \
   --batch 32 \

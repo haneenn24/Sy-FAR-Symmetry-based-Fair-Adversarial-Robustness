@@ -14,6 +14,7 @@ This repository provides the official implementation of **Sy-FAR**, a training a
 ```
 .
 ├─ attacks/
+│  ├─ dataprepare             # Include physical glasses, stickers, masks, etc.
 │  ├─ autoattack.py           # AutoAttack evaluation (CIFAR-10/100)
 │  ├─ glass_attack.py         # eyeglass-frame attack
 │  ├─ smooth_glassattack.py   # randomized smoothing vs glasses
@@ -69,7 +70,15 @@ python training_schemes/standard.py \
   --batch-size 8 --epochs 25 --lr 1e-3 --opt sgd --step-size 7 --gamma 0.1
 ```
 
-### 2) Sy-FAR training (ours)
+### 2) Adversarial training via ROA (baseline)
+
+```bash
+python training_schemes/adversarial.py \
+  --batch-size 8 --epochs 5 --lr 1e-3 \
+  --alpha 20 --iters 100 --width 70 --height 70 --xskip 10 --yskip 10
+```
+
+### 3) Sy-FAR training (ours)
 
 ```bash
 python training_schemes/syfar.py \
@@ -80,17 +89,8 @@ python training_schemes/syfar.py \
 ```
 
 *Notes:*
-
 * The symmetry penalty is computed from the adversarial confusion matrix within each batch.
-* FAAL (KL-DRO) class reweighting is available in the codebase; enable it if your run script exposes the flags.
-
-### 3) Adversarial training via ROA (baseline)
-
-```bash
-python training_schemes/adversarial.py \
-  --batch-size 8 --epochs 5 --lr 1e-3 \
-  --alpha 20 --iters 100 --width 70 --height 70 --xskip 10 --yskip 10
-```
+* Provided other baselines training schemes (FAAL and SpecNorm).
 
 ### 4) Evaluate clean accuracy
 
@@ -108,11 +108,10 @@ python attacks/autoattack.py \
   --epsilon 8 --normalization 01
 ```
 
-### 6) Randomized smoothing vs glasses/patch
+### 6) GlassAttack
 
 ```bash
-python attacks/smooth_glassattack.py gaussian_model.pt -sigma 1.0 -outfile out_glass.txt --batch 32 --N 1000 --alpha 0.001
-python attacks/smooth_patch.py gaussian_model.pt -sigma 1.0
+python glass_attack.py --model-checkpoint /path/to/model.pt --glass-mask-path ./attacks/dataprepare/silhouette.png --batch-size 64 --alpha 20 --iters 1 10 50 100 300 --restarts 1 --num-classes 8 --save-images --save-dir ./attack_outputs
 ```
 
 ### 7) Visualize fairness/robustness
@@ -147,21 +146,6 @@ We provide:
 * The **symmetry penalty** used during training.
 
 See `evaluation/metrics_report.py` and `utils/plot_visual_metrics.py`.
-
----
-
-## Evaluate
-
-**Clean accuracy**
-```bash
-python evaluation/test_clean_accuracy.py --model-path <PATH_TO_YOUR_MODEL>.pt
-````
-
-**Glasses attack**
-
-```bash
-python attacks/glass_attack.py --model-path <PATH_TO_YOUR_MODEL>.pt
-```
 
 ---
 
@@ -260,7 +244,7 @@ Organize cropped images as:
 
 ---
 
-### 4) Normalization (match our code)
+### 4) Normalization
 
 We use VGG-Face–style normalization:
 
@@ -276,11 +260,15 @@ Some attack scripts also subtract classic VGG-Face **BGR** means in pixel space:
 
 ---
 
+## Pretrained models
+
+We also include pre-trained models for all training schemes—standard training, ROA-based adversarial training, FAAL, SpecNorm, and our Sy-FAR method so users can directly evaluate clean and adversarial performance without retraining models from scratch.
+
+---
+
 ## Contact
 
 Questions, issues, or contributions are welcome—please open a GitHub issue or pull request.
-
-
 
 ---
 
@@ -289,10 +277,9 @@ Questions, issues, or contributions are welcome—please open a GitHub issue or 
 If you find this repository useful in your research, please cite:
 
 ```bibtex
-@article{najjar2025syfar,
+@inproceedings{najjar2025syfar,
     author  = {Najjar, Haneen and Ronen, Eyal and Sharif, Mahmood},
     title   = {{Sy-FAR}: {S}ymmetry-based Fair Adversarial Robustness},
-    year    = {2025},
-    journal = {arXiv preprint}
+    year    = {2026},
+    booktitle = {USENIX Security Symposium}
 }
-

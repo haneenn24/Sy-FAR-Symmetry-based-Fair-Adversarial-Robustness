@@ -8,7 +8,7 @@ Usage
 -----
 python glass_attack.py \
   --model-checkpoint /path/to/model.pt \
-  --glass-mask-path ./glass/Experiment/dataprepare/silhouette.png \
+  --glass-mask-path ./attacks/dataprepare/silhouette.png \
   --batch-size 64 \
   --alpha 20 \
   --iters 1 10 50 100 300 \
