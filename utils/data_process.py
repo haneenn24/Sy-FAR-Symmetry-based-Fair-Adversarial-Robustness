@@ -161,7 +161,7 @@ def _build_argparser():
     parser.add_argument("--data-dir", type=Path, required=True,
                         help="Root directory containing train/val/test subfolders")
     parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--image-size", type=int, default=224)
+    parser.add_argument("--image-size", type=int, default=112)
     parser.add_argument("--num-workers", type=int, default=8)
     parser.add_argument("--no-pin-memory", dest="pin_memory", action="store_false", default=True)
     parser.add_argument("--train-shuffle", action="store_true", default=True)

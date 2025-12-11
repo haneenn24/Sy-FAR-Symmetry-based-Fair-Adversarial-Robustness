@@ -1,6 +1,8 @@
 # training/standard.py
 # -*- coding: utf-8 -*-
 
+#python training/standard.py --data-dir /path/to/dataset --model vgg16 --num-classes 8 --batch-size 32 --epochs 30 --optimizer sgd --lr 0.001 --momentum 0.9 --weight-decay 0.0005 --scheduler steplr --step-size 7 --gamma 0.1 --amp --out-dir ./runs/standard_vgg
+
 from __future__ import annotations
 
 import argparse

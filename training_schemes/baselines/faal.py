@@ -1,262 +1,321 @@
-# utils/faal.py
+# training_schemes/faal.py
 # -*- coding: utf-8 -*-
-
-"""
-FAAL: Fair/Adversarial reweighting via KL-divergence ambiguity set.
-
-We solve, for a batch of N samples with per-sample losses `ℓ_i`:
-
-    maximize_p   sum_i p_i * ℓ_i
-    subject to   p_i >= 0, sum_i p_i = 1,
-                 KL(P_emp || p) <= r
-
-where P_emp is the empirical (usually uniform) distribution on the batch,
-and r >= 0 controls robustness. This pushes mass toward harder examples
-in a principled distributionally robust way.
-
-Dependencies:
-    - cvxpy
-    - ECOS (preferred open-source solver)
-    - SCS (fallback open-source solver)
-"""
+#python -m training_schemes.faal --data-dir /path/to/dataset --model vgg16 --num-classes 12 --epochs 20 --batch-size 16 --lr 0.001 --clean-weight 0.1 --adv-weight 0.9 --tau 0.5 --alpha 0.02 --iters 40 --width 70 --height 70 --xskip 10 --yskip 10 --out-dir ./runs/faal
 
 from __future__ import annotations
+import argparse
+import datetime as dt
+import time
+from pathlib import Path
+import copy
 
-from dataclasses import dataclass, field
-from typing import Iterable, List, Optional, Sequence
-
-import numpy as np
 import torch
-import cvxpy as cp
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.optim import lr_scheduler
+from tqdm import tqdm
+
+from utils.data_process import data_process
+from models.vgg16 import VGG_16
+from models.resnet import ResNet18
+from models.vit import ViT
 
 
-# ----------------------------------------------------------------------
-# Configuration
-# ----------------------------------------------------------------------
+# ================================================================
+#                       ROA ATTACK
+# ================================================================
 
-@dataclass
-class FAALConfig:
-    train_batch_size: int
-    r_choice: float = 0.0                     # robustness radius (KL-ball size)
-    learning_approach: str = "kl"
-    output_return: str = "weights"
-    empirical: Optional[Sequence[float]] = None 
-    solver_order: Sequence[str] = field(
-        default_factory=lambda: ("ECOS", "SCS") 
+class ROA:
+    def __init__(self, model, alpha, iters):
+        self.model = model
+        self.alpha = alpha
+        self.iters = iters
+
+    @torch.no_grad()
+    def choose_position(self, X, y, width, height, xskip, yskip):
+        B, _, H, W = X.shape
+        device = X.device
+
+        xtimes = max(1, (W - width) // xskip)
+        ytimes = max(1, (H - height) // yskip)
+
+        best_loss = torch.full((B,), -1e9, device=device)
+        best_i = torch.zeros(B, device=device)
+        best_j = torch.zeros(B, device=device)
+
+        self.model.eval()
+
+        for i in range(xtimes):
+            for j in range(ytimes):
+                img = X.clone()
+                img[:, :, j*yskip:j*yskip+height, i*xskip:i*xskip+width] = 0.5
+
+                logits = self.model(img)
+                loss = F.cross_entropy(logits, y, reduction="none")
+
+                mask = loss > best_loss
+                best_loss[mask] = loss[mask]
+                best_i[mask] = float(i)
+                best_j[mask] = float(j)
+
+        return best_i, best_j
+
+    def refine(self, X, y, best_i, best_j, width, height, xskip, yskip):
+        B, C, H, W = X.shape
+        device = X.device
+
+        mask = torch.zeros_like(X, device=device)
+        for b in range(B):
+            i = int(best_i[b].item())
+            j = int(best_j[b].item())
+            mask[b, :, j*yskip:j*yskip+height, i*xskip:i*xskip+width] = 1.0
+
+        X_adv = X.clone().detach()
+        X_adv.requires_grad_(True)
+
+        for _ in range(self.iters):
+            logits = self.model(X_adv)
+            loss = F.cross_entropy(logits, y)
+            loss.backward()
+
+            step = self.alpha * torch.sign(X_adv.grad)
+            X_adv = (X_adv + step * mask).clamp(0.0, 1.0).detach()
+            X_adv.requires_grad_(True)
+
+        return X_adv.detach()
+
+    def generate(self, X, y, width, height, xskip, yskip):
+        i, j = self.choose_position(X, y, width, height, xskip, yskip)
+        return self.refine(X, y, i, j, width, height, xskip, yskip)
+
+
+# ================================================================
+#             CARLINI–WAGNER LOSS (used in FAAL)
+# ================================================================
+
+def cw_loss(logits, labels, margin=0.5):
+    logits = F.log_softmax(logits, dim=1)
+    correct = logits.gather(1, labels.view(-1, 1)).squeeze()
+
+    temp = logits.clone()
+    temp[torch.arange(logits.size(0)), labels] = -float("inf")
+    max_wrong = temp.max(dim=1)[0]
+
+    loss = F.relu(max_wrong - correct + margin)
+    return loss.mean()
+
+
+# ================================================================
+#                       FAAL WEIGHT SOLVER
+# ================================================================
+
+def solve_kl_dro(class_losses: torch.Tensor, tau: float):
+    K = class_losses.size(0)
+    max_loss = class_losses.max()
+
+    w = torch.exp((class_losses - max_loss) / tau)
+    w = w / w.sum()
+
+    prior = torch.ones_like(w) / K
+    kl = torch.sum(w * torch.log(w / prior + 1e-8))
+
+    w = w * torch.exp(-tau * kl)
+    w = w / w.sum()
+    w = torch.clamp(w, min=0.005)
+
+    return w
+
+
+# ================================================================
+#                     MODEL BUILDER
+# ================================================================
+
+def build_model(name: str, num_classes: int):
+    name = name.lower()
+    if name in ("vgg", "vgg16"):
+        return VGG_16(num_classes=num_classes)
+    if name in ("resnet", "resnet18"):
+        return ResNet18(num_classes=num_classes)
+    if name in ("vit", "vit_base_patch16_224"):
+        return ViT("vit_base_patch16_224", pretrained=True, num_classes=num_classes)
+    raise ValueError(f"Unknown model name: {name}")
+
+
+# ================================================================
+#                  TRAINING LOOP (FAAL)
+# ================================================================
+
+def train_one_epoch_faal(
+    model, loader, device, optimizer, roa, roa_params,
+    clean_weight, adv_weight, tau, epoch
+):
+    model.train()
+
+    running_loss = 0.0
+    running_clean_acc = 0
+    running_adv_acc = 0
+    total = 0
+
+    num_classes = model.fc8.out_features if hasattr(model, "fc8") else None
+
+    for X, y in tqdm(loader, desc=f"Epoch {epoch} [train]"):
+        X, y = X.to(device), y.to(device)
+        optimizer.zero_grad()
+
+        clean_logits = model(X)
+        clean_loss = cw_loss(clean_logits, y)
+        clean_preds = clean_logits.argmax(1)
+
+        # ROA adversarial examples
+        X_adv = roa.generate(X, y, roa_params["width"], roa_params["height"],
+                             roa_params["xskip"], roa_params["yskip"])
+        adv_logits = model(X_adv)
+        adv_preds = adv_logits.argmax(1)
+
+        # per-class DRO
+        K = adv_logits.shape[1]
+        class_losses = torch.zeros(K, device=device)
+        for c in range(K):
+            mask = (y == c)
+            if mask.any():
+                class_losses[c] = cw_loss(adv_logits[mask], y[mask])
+            else:
+                class_losses[c] = 0.01
+
+        w = solve_kl_dro(class_losses, tau)
+        faal_loss = (w * class_losses).sum()
+
+        loss = clean_weight * clean_loss + adv_weight * faal_loss
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        optimizer.step()
+
+        running_loss += loss.item() * X.size(0)
+        running_clean_acc += (clean_preds == y).sum().item()
+        running_adv_acc += (adv_preds == y).sum().item()
+        total += X.size(0)
+
+    return (
+        running_loss / total,
+        running_clean_acc / total,
+        running_adv_acc / total,
     )
-    ecos_opts: dict = field(default_factory=dict)   # e.g., {"max_iters": 5000}
-    scs_opts: dict = field(default_factory=dict)    # e.g., {"max_iters": 10000}
-    numerical_eps: float = 1e-9
 
 
-# Backward-compatible alias for older code
-class DAW:
-    """
-    Wrapper maintaining compatibility with your original API.
-    The canonical class name is FAAL.
-    """
+@torch.no_grad()
+def evaluate(model, loader, device):
+    model.eval()
+    total = 0
+    correct = 0
+    loss_accum = 0.0
 
-    def __init__(
-        self,
-        train_batch_size: int,
-        r_choice: float,
-        learning_approach: str = "kl",
-        output_return: str = "weights",
-        empirical: Optional[Sequence[float]] = None,
-        solver_order: Sequence[str] = ("ECOS", "SCS"),
-    ) -> None:
+    for X, y in loader:
+        X, y = X.to(device), y.to(device)
+        logits = model(X)
+        loss = F.cross_entropy(logits, y)
 
-        self.cfg = FAALConfig(
-            train_batch_size=train_batch_size,
-            r_choice=float(r_choice),
-            learning_approach=learning_approach,
-            output_return=output_return,
-            empirical=empirical,
-            solver_order=tuple(solver_order),
-        )
-        self._validate()
+        loss_accum += loss.item() * X.size(0)
+        correct += (logits.argmax(1) == y).sum().item()
+        total += X.size(0)
 
-        self._p_var: Optional[cp.Variable] = None
-        self._loss_param: Optional[cp.Parameter] = None
-        self._Pemp: Optional[cp.Parameter] = None
-        self._prob: Optional[cp.Problem] = None
-        self._N: Optional[int] = None
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
-    def solve_weight(
-        self,
-        y: torch.Tensor,
-        inf_loss: Optional[torch.Tensor] = None,
-        device: str | torch.device = "cuda",
-    ) -> torch.Tensor:
-        """
-        Legacy entry point (y is unused in KL objective).
-        """
-        if inf_loss is None:
-            raise ValueError("`inf_loss` must be provided (shape: (N,)).")
-        return self.compute_weights(inf_loss, device=device)
-
-    def compute_weights(
-        self,
-        losses: torch.Tensor,
-        device: str | torch.device = None,
-    ) -> torch.Tensor:
-        """
-        Main API. Solve for adversarial weights given per-sample losses.
-        """
-        if losses.dim() != 1:
-            raise ValueError(f"`losses` must be 1D, got shape {tuple(losses.shape)}")
-        N = int(losses.shape[0])
-
-        # r = 0 → uniform weights (fast path, no CVX needed)
-        if self.cfg.r_choice <= 0:
-            w = torch.full((N,), 1.0 / N, device=losses.device, dtype=losses.dtype)
-            return w
-
-        # Rebuild CVX problem if needed
-        if self._prob is None or self._N != N:
-            self._build_problem(N)
-
-        # Set loss parameter
-        loss_np = losses.detach().to(dtype=torch.float64, device="cpu").numpy()
-        self._loss_param.value = loss_np
-
-        # Set empirical distribution
-        if self.cfg.empirical is None:
-            Pemp = np.full(N, 1.0 / N, dtype=np.float64)
-        else:
-            Pemp = np.asarray(self.cfg.empirical, dtype=np.float64)
-            if Pemp.shape != (N,):
-                raise ValueError("`empirical` must have shape (N,).")
-        self._Pemp.value = Pemp
-
-        # Solve
-        self._solve()
-
-        # Retrieve solution
-        p_val = np.asarray(self._p_var.value, dtype=np.float64)
-        if p_val is None or np.any(~np.isfinite(p_val)):
-            raise RuntimeError("FAAL solver failed to produce a finite solution.")
-
-        # Numerical cleanup
-        p_val = np.clip(p_val, 0.0, None)
-        s = p_val.sum()
-        if s <= self.cfg.numerical_eps:
-            p_val = np.full(N, 1.0 / N, dtype=np.float64)
-        else:
-            p_val /= s
-
-        out_device = losses.device if device is None else device
-        return torch.tensor(p_val, device=out_device, dtype=losses.dtype)
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    def _validate(self) -> None:
-        if self.cfg.learning_approach != "kl":
-            raise ValueError("Only 'kl' learning_approach is supported.")
-        if self.cfg.output_return != "weights":
-            raise ValueError("Only output_return='weights' is supported.")
-        if self.cfg.r_choice < 0:
-            raise ValueError("r_choice must be >= 0.")
-
-    def _build_problem(self, N: int) -> None:
-        """
-        Build CVXPY problem:
-
-            maximize   ⟨p, loss⟩
-            s.t.       p >= 0, sum(p)=1,
-                       KL(Pemp || p) <= r
-        """
-        self._N = N
-        self._p_var = cp.Variable(shape=N, nonneg=True, name="p")
-        self._loss_param = cp.Parameter(shape=N, name="loss")
-        self._Pemp = cp.Parameter(shape=N, name="Pemp")
-
-        objective = cp.Maximize(cp.sum(cp.multiply(self._p_var, self._loss_param)))
-        constraints = [
-            cp.sum(self._p_var) == 1,
-            cp.sum(cp.kl_div(self._Pemp, self._p_var)) <= float(self.cfg.r_choice),
-        ]
-
-        self._prob = cp.Problem(objective, constraints)
-
-    def _solve(self) -> None:
-        """
-        Try ECOS, then SCS. Both are open-source.
-        """
-        assert self._prob is not None
-        last_err: Optional[Exception] = None
-
-        for solver in self.cfg.solver_order:
-            try:
-                if solver.upper() == "ECOS":
-                    self._prob.solve(solver=cp.ECOS, **self.cfg.ecos_opts)
-                elif solver.upper() == "SCS":
-                    self._prob.solve(solver=cp.SCS, **self.cfg.scs_opts)
-                else:
-                    continue
-
-                if self._prob.status in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
-                    return
-
-                last_err = RuntimeError(
-                    f"Solver {solver} ended with status: {self._prob.status}"
-                )
-            except Exception as e:
-                last_err = e
-                continue
-
-        raise RuntimeError(f"All solvers failed. Last error: {last_err}")
+    return loss_accum / total, correct / total
 
 
-FAAL = DAW
+# ================================================================
+#                           CLI
+# ================================================================
 
-# ----------------------------------------------------------------------
-# CLI (quick manual test)
-# ----------------------------------------------------------------------
+def build_argparser():
+    p = argparse.ArgumentParser(description="FAAL adversarial training with ROA")
 
-def _build_argparser():
-    import argparse
-    p = argparse.ArgumentParser(
-        description="FAAL (KL-robust) batch reweighting",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    p.add_argument("--batch-size", type=int, default=32)
-    p.add_argument("--r", type=float, default=0.1)
-    p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--solver-order", type=str, default="ECOS,SCS")
-    p.add_argument("--ecos-iters", type=int, default=5000)
-    p.add_argument("--scs-iters", type=int, default=10000)
+    # data
+    p.add_argument("--data-dir", type=Path, required=True)
+    p.add_argument("--batch-size", type=int, default=16)
+
+    # model
+    p.add_argument("--model", type=str, default="vgg16")
+    p.add_argument("--num-classes", type=int, required=True)
+
+    # training
+    p.add_argument("--epochs", type=int, default=10)
+    p.add_argument("--lr", type=float, default=1e-3)
+
+    # FAAL weights
+    p.add_argument("--clean-weight", type=float, default=0.1)
+    p.add_argument("--adv-weight", type=float, default=0.9)
+    p.add_argument("--tau", type=float, default=0.5)
+
+    # ROA params
+    p.add_argument("--alpha", type=float, default=0.02)
+    p.add_argument("--iters", type=int, default=40)
+    p.add_argument("--width", type=int, default=70)
+    p.add_argument("--height", type=int, default=70)
+    p.add_argument("--xskip", type=int, default=10)
+    p.add_argument("--yskip", type=int, default=10)
+
+    p.add_argument("--out-dir", type=Path, default=Path("./runs/faal"))
     return p
 
 
-def _main():
-    args = _build_argparser().parse_args()
-    torch.manual_seed(args.seed)
-    N = args.batch_size
+# ================================================================
+#                        MAIN FUNCTION
+# ================================================================
 
-    # Example losses
-    losses = torch.rand(N)
+def main():
+    args = build_argparser().parse_args()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    daw = FAAL(
-        train_batch_size=N,
-        r_choice=args.r,
-        solver_order=tuple(x.strip() for x in args.solver_order.split(",")),
+    ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_dir = args.out_dir / f"{args.model}_{ts}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    dataloaders, dataset_sizes, class_names = data_process(
+        batch_size=args.batch_size,
+        data_dir=args.data_dir,
+        image_size=224,
+        pin_memory=True,
     )
 
-    daw.cfg.ecos_opts = {"max_iters": args.ecos_iters}
-    daw.cfg.scs_opts = {"max_iters": args.scs_iters}
+    model = build_model(args.model, args.num_classes).to(device)
 
-    w = daw.compute_weights(losses)
-    print(f"losses (first 8): {losses[:8].tolist()}")
-    print(f"weights (first 8): {w[:8].tolist()}")
-    print(f"sum(weights) = {float(w.sum()):.6f}")
+    optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
+    scheduler = lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
+
+    roa_params = dict(
+        alpha=args.alpha,
+        iters=args.iters,
+        width=args.width,
+        height=args.height,
+        xskip=args.xskip,
+        yskip=args.yskip,
+    )
+    roa = ROA(model, args.alpha, args.iters)
+
+    best_acc = 0.0
+    best_state = None
+
+    for epoch in range(1, args.epochs + 1):
+        train_loss, clean_acc, adv_acc = train_one_epoch_faal(
+            model, dataloaders["train"], device, optimizer,
+            roa, roa_params, args.clean_weight, args.adv_weight, args.tau, epoch
+        )
+        val_loss, val_acc = evaluate(model, dataloaders["val"], device)
+
+        print(
+            f"Epoch {epoch:02d} | "
+            f"clean_acc={clean_acc:.4f} | adv_acc={adv_acc:.4f} | val_acc={val_acc:.4f}"
+        )
+
+        scheduler.step()
+
+        if val_acc > best_acc:
+            best_acc = val_acc
+            best_state = {k: v.cpu() for k, v in model.state_dict().items()}
+            torch.save(best_state, out_dir / "best.pt")
+
+    torch.save(best_state, out_dir / "final.pt")
+    print(f"[done] Results saved to {out_dir}")
 
 
 if __name__ == "__main__":
-    _main()
+    main()

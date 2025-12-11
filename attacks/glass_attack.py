@@ -7,25 +7,15 @@ Sy-FAR / Eyeglass Frame Attack (targeted + untargeted, digit-space, fixed mask)
 Usage
 -----
 UNTARGETED:
-python glass_attack.py \
-  --model-checkpoint /path/to/model.pt \
-  --glass-mask-path ./attacks/mask/eyeglass.png \
-  --batch-size 64 \
-  --alpha 20 \
-  --iters 1 10 50 100 300 \
-  --restarts 1 \
-  --num-classes 8
+python glass_attack.py --model-checkpoint /path/to/your_model.pt \
+--glass-mask-path attacks/mask/eyeglass.png --data-dir /path_to_dataset/ --batch-size 64 --alpha 20 \
+--iters 1 10 50 100 300 --restarts 1 --num-classes 12 --save-dir ./attack_outputs/glass_untargeted
 
 TARGETED:
-python glass_attack.py \
-  --model-checkpoint /path/to/model.pt \
-  --glass-mask-path ./attacks/mask/eyeglass.png \
-  --targeted \
-  --target-class 5 \
-  --batch-size 64 \
-  --alpha 20 \
-  --iters 100 \
-  --restarts 1
+python glass_attack.py --model-checkpoint /path/to/your_model.pt \
+--glass-mask-path attacks/mask/eyeglass.png --data-dir /path_to_dataset/ --targeted --target-class 5 --batch-size 64 --alpha 20 \
+--iters 100 --restarts 1 --num-classes 12 --save-dir ./attack_outputs/glass_targeted_class5
+
 
 Notes
 -----
@@ -52,7 +42,7 @@ from torchvision import transforms
 # ----------------------------
 # Local imports
 # ----------------------------
-from utils import data_process
+from utils.data_process import data_process
 from models.vgg16 import VGG_16
 
 
@@ -332,7 +322,8 @@ def parse_args(argv=None):
     p.add_argument("--model-checkpoint", type=Path, required=True)
     p.add_argument("--glass-mask-path", type=Path, required=True)
     p.add_argument("--save-dir", type=Path, default=Path("./attack_outputs"))
-
+    p.add_argument("--data-dir", type=str, required=True,
+               help="Root dataset directory containing train/val/test")
     # attack mode
     p.add_argument("--targeted", action="store_true", help="Use targeted attack")
     p.add_argument("--target-class", type=int, default=None, help="Target class for targeted attack")
@@ -381,7 +372,7 @@ def main(argv=None):
     model.load_state_dict(state)
     model.to(device).eval()
 
-    dataloaders, _, _ = data_process(args.batch_size)
+    dataloaders, _, _ = data_process(batch_size=args.batch_size, data_dir=args.data_dir)
     test_loader = dataloaders["test"]
 
     evaluate_attack(

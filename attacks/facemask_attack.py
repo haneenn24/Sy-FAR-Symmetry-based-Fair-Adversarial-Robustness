@@ -7,29 +7,30 @@ Sy-FAR / Face Mask Attack (targeted + untargeted, digit-space, fixed mask)
 Usage
 -----
 UNTARGETED:
-python mask_attack.py \
-  --model-checkpoint /path/to/model.pt \
+python attacks/facemask_attack.py \
+  --model-checkpoint /path/to/your_model.pt \
   --mask-path attacks/mask/facemask.png \
+  --data-dir /path_to_dataset/ \
   --batch-size 64 \
   --alpha 20 \
   --iters 1 10 50 100 \
-  --num-classes 8
+  --restarts 1 \
+  --num-classes 10
+
 
 TARGETED:
-python mask_attack.py \
-  --model-checkpoint /path/to/model.pt \
+python attacks/facemask_attack.py \
+  --model-checkpoint /path/to/your_model.pt \
   --mask-path attacks/mask/facemask.png \
-  --targeted \
-  --target-class 5 \
+  --data-dir /path_to_dataset/ \
+  --batch-size 64 \
   --alpha 20 \
-  --iters 200
+  --iters 200 \
+  --restarts 1 \
+  --num-classes 10 \
+  --targeted \
+  --target-class 5
 
-Notes
------
-- This is the *grid-level* face mask attack inspired by FACESEC (δ-grid).
-- Untargeted: maximize CE(f(X), y)
-- Targeted: minimize CE(f(X), y_target)
-- δ is a learnable (8×16×3) grid → upsampled → masked → added in digit space.
 """
 
 from __future__ import annotations
@@ -38,7 +39,7 @@ import argparse
 import logging
 import random
 from pathlib import Path
-from typing import Iterable, List, Tuple
+from typing import Tuple
 
 import cv2
 import numpy as np
@@ -48,14 +49,14 @@ import torchvision
 from torchvision import transforms
 
 # ----------------------------
-# Local project imports
+# Local imports
 # ----------------------------
-from utils import data_process
+from utils.data_process import data_process
 from models.vgg16 import VGG_16
 
 
 # ============================================================
-# Utility Functions
+# Utilities
 # ============================================================
 
 def set_seed(seed: int = 12345) -> None:
@@ -69,6 +70,7 @@ def setup_logging(level: str = "INFO", log_file: str = "") -> None:
     if log_file:
         Path(log_file).parent.mkdir(parents=True, exist_ok=True)
         handlers.append(logging.FileHandler(log_file, mode="w"))
+
     logging.basicConfig(
         level=getattr(logging, level.upper()),
         format="%(asctime)s | %(levelname)s | %(message)s",
@@ -76,57 +78,44 @@ def setup_logging(level: str = "INFO", log_file: str = "") -> None:
     )
 
 
-def save_image_tensor(image: torch.Tensor, filename: str, directory: Path) -> None:
-    directory.mkdir(parents=True, exist_ok=True)
-    torchvision.utils.save_image(image, str(directory / filename))
+def rgb_to_bgr(x: torch.Tensor) -> torch.Tensor:
+    return x[:, [2,1,0], :, :]
 
 
-def rgb_to_bgr(images: torch.Tensor) -> torch.Tensor:
-    return images[:, [2, 1, 0], :, :]
-
-
-def update_confusion_matrix(cm: np.ndarray, labels: torch.Tensor, preds: torch.Tensor) -> None:
-    y_true = labels.cpu().numpy()
-    y_pred = preds.cpu().numpy()
-    for t, p in zip(y_true, y_pred):
+def update_confusion_matrix(cm: np.ndarray, labels: torch.Tensor, preds: torch.Tensor):
+    for t, p in zip(labels.cpu().numpy(), preds.cpu().numpy()):
         cm[t, p] += 1
 
 
-def compute_class_accuracy(cm: np.ndarray) -> np.ndarray:
-    with np.errstate(divide="ignore", invalid="ignore"):
-        row_sum = cm.sum(axis=1)
-        diag = np.diag(cm)
-        out = diag / row_sum
-        out[row_sum == 0] = np.nan
-        return out
+def compute_acc(cm: np.ndarray):
+    acc = np.zeros(cm.shape[0])
+    for i in range(cm.shape[0]):
+        if cm[i].sum() > 0:
+            acc[i] = cm[i,i] / cm[i].sum()
+        else:
+            acc[i] = np.nan
+    return acc
 
 
 # ============================================================
-# FACE MASK ATTACK (GRID-LEVEL)
+# Face Mask Grid-Level Attack
 # ============================================================
 
 class FaceMaskAttack:
-    """
-    Implements grid-level δ attack used on the face mask region.
 
-    δ-grid: shape (N,3,Gh,Gw)
-    T(δ): bilinear upsample to image → multiply by binary mask M
-    """
-
-    def __init__(
-        self,
+    def __init__(self,
         model,
         mask_M: torch.Tensor,
         device,
         alpha: float = 20.0,
         momentum: float = 0.4,
-        grid_size: Tuple[int,int] = (8,16),
-        targeted: bool = False,
-        target_class: int = None,
-        bgr_mean: Tuple[float,float,float] = (129.1863,104.7624,93.5940),
+        grid_size: Tuple[int,int]=(8,16),
+        targeted: bool=False,
+        target_class: int=None,
+        bgr_mean=(129.1863,104.7624,93.5940)
     ):
         self.model = model
-        self.M = mask_M.to(device)               # (3,H,W)
+        self.M = mask_M.to(device)
         self.device = device
         self.alpha = alpha
         self.mu = momentum
@@ -134,27 +123,17 @@ class FaceMaskAttack:
         self.target_class = target_class
         self.Gh, self.Gw = grid_size
 
-        self.loss_red = nn.CrossEntropyLoss()
+        self.loss_fn = nn.CrossEntropyLoss()
+        self.mean = torch.tensor(bgr_mean).view(1,3,1,1).float().to(device)
 
-        mean = torch.tensor(bgr_mean).view(1,3,1,1).float()
-        self.mean = mean.to(device)
-
-    # ---------------------------
-    # TRANSFORM T(δ): upsample + mask
-    # ---------------------------
-    def _apply_T(self, delta_grid, H, W):
-        up = torch.nn.functional.interpolate(delta_grid, size=(H,W),
-                    mode="bilinear", align_corners=False)
+    def _T(self, delta_grid, H, W):
+        up = torch.nn.functional.interpolate(
+            delta_grid, size=(H,W),
+            mode="bilinear", align_corners=False
+        )
         return up * self.M
 
-    # ---------------------------
-    # MAIN ATTACK CALL
-    # ---------------------------
-    def __call__(self, base, labels, iters: int):
-        """
-        base = (X_bgr + mean) * (1 - mask)
-        labels: true labels (untargeted)
-        """
+    def __call__(self, base, labels, iters):
         N, C, H, W = base.shape
 
         if self.targeted:
@@ -162,42 +141,38 @@ class FaceMaskAttack:
         else:
             y = labels
 
-        # Initialise δ-grid (zero start)
         delta = torch.zeros((N,3,self.Gh,self.Gw), device=self.device, requires_grad=True)
-        mom = torch.zeros_like(delta)
+        momentum = torch.zeros_like(delta)
 
         for _ in range(iters):
-            delta_img = self._apply_T(delta, H, W)
-            X_adv = torch.clamp(
-                torch.round(base + delta_img),
-                0, 255
-            ) - self.mean
+            delta_img = self._T(delta, H, W)
+            X_adv = torch.round(base + delta_img).clamp(0,255) - self.mean
 
             logits = self.model(X_adv)
-            loss = self.loss_red(logits, y)
+            loss = self.loss_fn(logits, y)
 
-            # Targeted: minimize CE → maximize negative CE
+            # targeted → minimize CE → take negative
             if self.targeted:
                 loss = -loss
 
             loss.backward()
 
-            grad = delta.grad
-            grad_norm = grad.abs().mean() + 1e-8
+            g = delta.grad
+            g_norm = g.abs().mean() + 1e-8
 
-            mom = self.mu * mom + grad / grad_norm
-            delta = (delta + self.alpha * mom.sign()).detach().requires_grad_(True)
+            momentum = self.mu * momentum + g / g_norm
+            delta = (delta + self.alpha * momentum.sign()).detach().requires_grad_(True)
 
-            delta.clamp_(0, 1.0)   # safe normalized grid range
+            delta = delta.clamp(0, 1).detach().requires_grad_(True)
 
-        # Final attack image
-        delta_img = self._apply_T(delta, H, W)
-        X_adv = torch.round(base + delta_img) - self.mean
+
+        delta_img = self._T(delta, H, W)
+        X_adv = torch.round(base + delta_img).clamp(0,255) - self.mean
         return X_adv.detach()
 
 
 # ============================================================
-# EVALUATION LOOP
+# Evaluation
 # ============================================================
 
 def evaluate_attack(
@@ -209,13 +184,9 @@ def evaluate_attack(
     alpha,
     restarts,
     num_classes,
-    save_images,
-    save_dir,
     targeted,
     target_class,
-    log_images_every=0,
 ):
-
     attacker = FaceMaskAttack(
         model=model,
         mask_M=mask,
@@ -225,120 +196,92 @@ def evaluate_attack(
         target_class=target_class
     )
 
-    for n_iter in iters_list:
-        logging.info(f"\n=== Face Mask Attack | {'TARGETED' if targeted else 'UNTARGETED'} "
-                     f"| iters={n_iter} | alpha={alpha} ===")
+    for iters in iters_list:
+        logging.info(f"\n=== FaceMask Attack | {'TARGETED' if targeted else 'UNTARGETED'} | iters={iters} ===")
 
-        confusion = np.zeros((num_classes, num_classes), dtype=np.int32)
-        total = 0
+        cm = np.zeros((num_classes, num_classes), dtype=np.int32)
 
-        success_loose = 0
-        success_strict = 0
+        for xb, yb in dataloader:
+            xb = xb.to(device)
+            yb = yb.to(device)
 
-        for images_rgb, labels in dataloader:
-            images_rgb = images_rgb.to(device)
-            labels = labels.to(device)
+            xb_bgr = rgb_to_bgr(xb)
 
-            images_bgr = rgb_to_bgr(images_rgb)
+            base = (xb_bgr + attacker.mean) * (1 - mask)
 
-            for r in range(restarts):
-                # Build base X0 = (X + mean)*(1-M)
-                base = (images_bgr + attacker.mean) * (1 - mask)
+            preds_final = None
 
-                X_adv = attacker(base, labels, n_iter)
-
+            for _ in range(restarts):
+                X_adv = attacker(base, yb, iters)
                 with torch.no_grad():
-                    preds = model(X_adv).argmax(1)
+                    preds_final = model(X_adv).argmax(1)
 
-            # Update confusion matrix
-            update_confusion_matrix(confusion, labels, preds)
+            update_confusion_matrix(cm, yb, preds_final)
 
-            if targeted:
-                success_loose += (preds == target_class).sum().item()
-                mask_no_diag = labels != target_class
-                success_strict += ((preds == target_class) & mask_no_diag).sum().item()
-
-            total += labels.size(0)
-
-        # Log Results
         logging.info("\nConfusion Matrix:")
-        logging.info(confusion)
+        logging.info(cm)
 
-        if targeted:
-            logging.info(f"Loose Success Rate: {success_loose/total:.4f}")
-            strict_total = total - confusion[target_class,target_class]
-            logging.info(f"Strict Success Rate: {success_strict/strict_total:.4f}")
-
-        per_class = compute_class_accuracy(confusion)
+        acc = compute_acc(cm)
         logging.info("Per-class accuracy:")
-        for c in range(num_classes):
-            logging.info(f"Class {c}: {0 if np.isnan(per_class[c]) else per_class[c]:.4f}")
+        for i,a in enumerate(acc):
+            logging.info(f"  class {i}: {0 if np.isnan(a) else a:.4f}")
 
 
 # ============================================================
-# CLI + Main
+# CLI and Main
 # ============================================================
 
 def parse_args(argv=None):
-    p = argparse.ArgumentParser(
-        description="Grid-level Face Mask Attack"
-    )
+    p = argparse.ArgumentParser(description="Grid-level FaceMask Attack")
 
-    # Paths / Model
+    # I/O
     p.add_argument("--model-checkpoint", type=Path, required=True)
-    p.add_argument("--mask-path", type=Path, required=True,
-                   help="Path to facemask.png mask (white region = attackable).")
-    p.add_argument("--save-dir", type=Path, default=Path("./mask_attack_outputs"))
+    p.add_argument("--mask-path", type=Path, required=True)
+    p.add_argument("--data-dir", type=Path, required=True)   # <<< ADDED!
 
-    # Attack
+    # attack
     p.add_argument("--targeted", action="store_true")
-    p.add_argument("--target-class", type=int, default=None)
-    p.add_argument("--alpha", type=float, default=20.0)
-    p.add_argument("--iters", type=int, nargs="+", default=[100])
+    p.add_argument("--target-class", type=int)
+    p.add_argument("--alpha", type=float, default=20)
+    p.add_argument("--iters", nargs="+", type=int, default=[100])
     p.add_argument("--restarts", type=int, default=1)
     p.add_argument("--num-classes", type=int, default=8)
 
-    # Data / system
+    # system
     p.add_argument("--batch-size", type=int, default=64)
-    p.add_argument("--seed", type=int, default=12345)
     p.add_argument("--device", type=str, default="cuda:0")
-
-    # Logging
-    p.add_argument("--save-images", action="store_true")
-    p.add_argument("--log-images-every", type=int, default=0)
+    p.add_argument("--seed", type=int, default=12345)
     p.add_argument("--log-level", type=str, default="INFO")
-    p.add_argument("--log-file", type=str, default="")
 
     return p.parse_args(argv)
 
 
-def load_mask(mask_path: Path):
-    img = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
-    mask = transforms.ToTensor()(img)  # (1,H,W)
-    mask = (mask > 0.1).float()
-    return mask.repeat(3,1,1)          # → (3,H,W)
+def load_mask(path: Path):
+    img = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+    mask = transforms.ToTensor()(img)          # (1,H,W)
+    mask = (mask > 0.1).float()                # binarize
+    return mask.repeat(3,1,1)                  # (3,H,W)
 
 
 def main(argv=None):
     args = parse_args(argv)
-    setup_logging(args.log_level, args.log_file)
-    set_seed(args.seed)
 
-    if args.targeted and args.target_class is None:
-        raise ValueError("You must provide --target-class in targeted mode.")
+    setup_logging(args.log_level)
+    set_seed(args.seed)
 
     device = torch.device(args.device)
 
-    mask = load_mask(args.mask_path)
+    # mask
+    mask = load_mask(args.mask_path).to(device)
 
-    # Load model
+    # model
     model = VGG_16()
-    state = torch.load(args.model_checkpoint, map_location="cpu")
-    model.load_state_dict(state)
+    model.load_state_dict(torch.load(args.model_checkpoint, map_location="cpu"))
     model.to(device).eval()
 
-    # Data
-    dataloaders, _, _ = data_process(args.batch_size)
+    # data
+    dataloaders, _, _ = data_process(batch_size=args.batch_size, data_dir=args.data_dir)
+
     test_loader = dataloaders["test"]
 
     evaluate_attack(
@@ -350,11 +293,8 @@ def main(argv=None):
         alpha=args.alpha,
         restarts=args.restarts,
         num_classes=args.num_classes,
-        save_images=args.save_images,
-        save_dir=args.save_dir,
         targeted=args.targeted,
         target_class=args.target_class,
-        log_images_every=args.log_images_every,
     )
 
 

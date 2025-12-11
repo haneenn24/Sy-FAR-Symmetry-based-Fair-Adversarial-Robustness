@@ -66,26 +66,25 @@ pip install -r requirements.txt
 ### 1) Standard training (clean ERM)
 
 ```bash
-python training_schemes/standard.py \
-  --batch-size 8 --epochs 25 --lr 1e-3 --opt sgd --step-size 7 --gamma 0.1
+python training/standard.py --data-dir /path/to/dataset --model vgg16 --num-classes 8 --batch-size 32 \
+--epochs 30 --optimizer sgd --lr 0.001 --momentum 0.9 --weight-decay 0.0005 --scheduler steplr \
+--step-size 7 --gamma 0.1 --amp --out-dir ./runs/standard_vgg
 ```
 
 ### 2) Adversarial training via ROA (baseline)
 
 ```bash
-python training_schemes/adversarial.py \
-  --batch-size 8 --epochs 5 --lr 1e-3 \
-  --alpha 20 --iters 100 --width 70 --height 70 --xskip 10 --yskip 10
+python -m training_schemes.adversarial --data-dir /path/to/dataset --model vgg16 --num-classes 12 \
+--epochs 20 --batch-size 16 --lr 0.001 --alpha 0.02 --iters 40 --width 70 --height 70 --xskip 10 \
+--yskip 10 --out-dir ./runs/adversarial_roa
 ```
 
 ### 3) Sy-FAR training (ours)
 
 ```bash
-python training_schemes/syfar.py \
-  --batch-size 8 --epochs 5 --lr 1e-3 \
-  --clean-weight 0.1 --adv-weight 10 --sym-weight 10 --epsilon 0.1 \
-  --alpha 20 --iters 100 --width 70 --height 70 --xskip 10 --yskip 10 \
-  --out-dir runs/syfar --tag pubfig_vgg16
+python -m training_schemes.syfar --data-dir /path/to/dataset --model vgg16 --num-classes 12 \
+--epochs 20 --batch-size 16 --lr 0.001 --w-clean 0.1 --w-adv 1.0 --w-sym 10.0 --eps 0.1 --alpha 0.02 \
+--iters 40 --width 70 --height 70 --xskip 10 --yskip 10 --out-dir ./runs/syfar
 ```
 
 *Notes:*
@@ -111,61 +110,37 @@ python attacks/autoattack.py \
 ## 6) Glass Attack (Eyeglass Frame)
 
 ### Untargeted Glass Attack
-python glass_attack.py \
-  --model-checkpoint /path/to/model.pt \
-  --glass-mask-path ./attacks/mask/eyeglass.png \
-  --batch-size 64 \
-  --alpha 20 \
-  --iters 1 10 50 100 300 \
-  --restarts 1 \
-  --num-classes 8 \
-  --save-images \
-  --save-dir ./attack_outputs/glass_untargeted
+```bash
+python glass_attack.py --model-checkpoint /path/to/your_model.pt \
+--glass-mask-path attacks/mask/eyeglass.png --data-dir /path_to_dataset/ --batch-size 64 --alpha 20 \
+--iters 1 10 50 100 300 --restarts 1 --num-classes 12 --save-dir ./attack_outputs/glass_untargeted
+```
 
 ### Targeted Glass Attack
-python glass_attack.py \
-  --model-checkpoint /path/to/model.pt \
-  --glass-mask-path ./attacks/mask/eyeglass.png \
-  --targeted \
-  --target-class 5 \
-  --batch-size 64 \
-  --alpha 20 \
-  --iters 100 \
-  --restarts 1 \
-  --num-classes 8 \
-  --save-images \
-  --save-dir ./attack_outputs/glass_targeted_class5
+```bash
+python glass_attack.py --model-checkpoint /path/to/your_model.pt \
+--glass-mask-path attacks/mask/eyeglass.png --data-dir /path_to_dataset/ --targeted --target-class 5 --batch-size 64 --alpha 20 \
+--iters 100 --restarts 1 --num-classes 12 --save-dir ./attack_outputs/glass_targeted_class5
+```
 
 ---
 
 ## 7) Face Mask Attack (Grid-Level δ)
 
 ### Untargeted Face Mask Attack
-python mask_attack.py \
-  --model-checkpoint /path/to/model.pt \
-  --mask-path ./attacks/mask/facemask.png \
-  --batch-size 64 \
-  --alpha 20 \
-  --iters 50 100 200 \
-  --restarts 1 \
-  --num-classes 8 \
-  --save-images \
-  --save-dir ./attack_outputs/mask_untargeted
+```bash
+python attacks/facemask_attack.py \ --model-checkpoint /path/to/your_model.pt \
+  --mask-path attacks/mask/facemask.png \ --data-dir /path_to_dataset/ \
+  --batch-size 64 \ --alpha 20 \ --iters 1 10 50 100 \ --restarts 1 \ --num-classes 10
+```
 
 ### Targeted Face Mask Attack
-python mask_attack.py \
-  --model-checkpoint /path/to/model.pt \
-  --mask-path ./attacks/mask/facemask.png \
-  --targeted \
-  --target-class 3 \
-  --batch-size 64 \
-  --alpha 20 \
-  --iters 200 \
-  --restarts 1 \
-  --num-classes 8 \
-  --save-images \
-  --save-dir ./attack_outputs/mask_targeted_class3
-
+```bash
+python attacks/facemask_attack.py \ --model-checkpoint /path/to/your_model.pt \
+  --mask-path attacks/mask/facemask.png \ --data-dir /path_to_dataset/ \
+  --batch-size 64 \ --alpha 20 \ --iters 200 \ --restarts 1 \ --num-classes 10 \
+  --targeted \ --target-class 5
+```
 
 ## Backbones
 
