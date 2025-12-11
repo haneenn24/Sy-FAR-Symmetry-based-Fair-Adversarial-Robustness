@@ -46,6 +46,7 @@ This repository provides the official implementation of **Sy-FAR**, a training a
 │  ├─ carlini_wagner.py       # CW margin losses
 │  ├─ data_process.py         # dataset transforms & dataloaders (edit data_dir)
 │  ├─ plot_visual_metrics.py  # heatmaps + exemplar strips
+│  ├─ split_dataset.py        # split a dataset into train/val/test subsets in ImageFolder format.
 │  └─ __init__.py
 │
 ├─ README.md
@@ -197,97 +198,67 @@ See `evaluation/metrics_report.py` and `utils/plot_visual_metrics.py`.
 All dependencies are pinned in `requirements.txt`.  
 This repository additionally uses several commonly adopted packages for vision models, adversarial evaluation, and robust optimization:
 
-- **timm** — Vision Transformer (ViT) models  
 - **autoattack**, **robustbench**, **torchattacks** — standard adversarial evaluation libraries  
 - **cvxpy** with open-source solvers **ECOS** and **SCS** for the FAAL reweighting module  
 
 All components are installable directly via `pip`, and no proprietary solvers are required.
 
 ---
-## Dataset: PubFig (setup & preprocessing)
+## Dataset (Preprocessed & Cropped)
 
-### 1) Download PubFig
-PubFig is released as **URL lists** (not images). Get the official files from Columbia CAVE:
-- Homepage: <https://www.cs.columbia.edu/CAVE/databases/pubfig/>
-- Download page (URL lists + metadata): <https://www.cs.columbia.edu/CAVE/databases/pubfig/download/>
+This artifact includes a **PubFig dataset with 12 identities** (10 PubFig + 2 siblings).  
+**All images are already preprocessed and cropped using FaceX-Zoo** (detect → align → crop).  
+All dataset images in this artifact were generated using the above FaceX-Zoo preprocessing pipeline.
 
-Optional helper to fetch images from the URL lists:
-- `getpubfig`: <https://github.com/dimatura/getpubfig>
+### FaceX-Zoo (used for preprocessing)
 
-```bash
-# Example using getpubfig
+git clone https://github.com/JDAI-CV/FaceX-Zoo.git  
+export PYTHONPATH="$PWD/FaceX-Zoo:$PYTHONPATH"  
+git checkout 16b793a7564a4b9308cf94e62bdb2ffacb3a725a  
+
+### FaceX-Zoo API examples (used during preprocessing)
+
+python api_usage/face_detect.py  
+python api_usage/face_alignment.py  
+python api_usage/face_crop.py  
+python api_usage/face_feature.py  
+python api_usage/face_pipline.py  
+python api_usage/face_parsing.py
+
+## Downloading Full Dataset: PubFig or VGGFace:
+
+### PubFig (URL-based dataset)
+PubFig provides URL lists instead of images. Download from:
+- https://www.cs.columbia.edu/CAVE/databases/pubfig/
+- https://www.cs.columbia.edu/CAVE/databases/pubfig/download/
+
+Optional image fetcher:
+- https://github.com/dimatura/getpubfig
+
+Example:
 git clone https://github.com/dimatura/getpubfig.git
 cd getpubfig
-# place the official dev_urls.txt / eval_urls.txt in this folder
-python getpubfig.py      # downloads into ./images by default
-````
+# place dev_urls.txt / eval_urls.txt here
+python getpubfig.py
 
-> If you curate a **PubFig-10** subset, create `classes.txt` (10 identities) and only keep those folders.
+### VGGFace / VGGFace2 (for sibling identities)
+If adding sibling pairs, obtain images from:
+- https://www.robots.ox.ac.uk/~vgg/data/vgg_face2/
+- https://www.robots.ox.ac.uk/~vgg/software/vgg_face/
 
-### PubFig-10 class list (used in this repo)
-
-Save as `classes.txt` (one per line) and use to subset your dataset:
-
-**Subnote:** “siblings” identities (optional)
-
-If you want sibling pairs, you can source additional identities from VGGFace/VGGFace2 and then run the same preprocessing:
-
-VGGFace2 info page: https://www.robots.ox.ac.uk/~vgg/data/vgg_face2/
-
-Original VGG Face page: https://www.robots.ox.ac.uk/~vgg/software/vgg_face/
-
-(Obtain images per the dataset’s instructions/terms, align & crop with your pipeline, and add the classes to your classes.txt.)
-
----
-
-### 2) Preprocess (detect → align → crop)
+Download per dataset terms, then run the same preprocessing (detect → align → crop).
 
 
-Use **FaceX-Zoo** for ArcFace-style alignment/cropping:
+### Split & Layout (ImageFolder)
 
-```bash
-# Clone the SDK once
-git clone https://github.com/JDAI-CV/FaceX-Zoo.git
-export PYTHONPATH="$PWD/FaceX-Zoo:$PYTHONPATH"   # make SDK importable
-git checkout 16b793a7564a4b9308cf94e62bdb2ffacb3a725a
-````
+If you want to create a train/val/test ImageFolder structure from the preprocessed dataset, run:
 
-Now run our wrapper:
+python utils/split_dataset.py
 
-```bash
-# A) Direct Python call
-python preprocess/crop_lfw_edited_by_arcface.py \
-  --lfw_edited_root /path/to/pubfig/images \
-  --lfw_lms_file   /path/to/landmarks.txt \
-  --target_folder  /path/to/PubFig_cropped
-```
+This generates train, val and test dirs.
 
-```bash
-# B) Shell wrapper
-bash preprocess/crop_images.sh \
-  RAW_IMG_DIR=/path/to/pubfig/images \
-  LANDMARKS=/path/to/landmarks.txt \
-  OUT_DIR=/path/to/PubFig_cropped
-```
 
----
-
-### 3) Split & layout (ImageFolder)
-
-Organize cropped images as:
-
-```
-<DATA_DIR>/
-  train/<class_name>/*.jpg
-  val/<class_name>/*.jpg
-  test/<class_name>/*.jpg
-```
-
-> Set this path in `utils/data_process.py` (`data_dir`).
-
----
-
-### 4) Normalization
+### Normalization
 
 We use VGG-Face–style normalization:
 
@@ -297,6 +268,7 @@ mean = [0.367035294117647, 0.41083294117647057, 0.5066129411764705]
 std  = [1/255, 1/255, 1/255]
 transforms.Normalize(mean, std)
 ```
+
 
 Some attack scripts also subtract classic VGG-Face **BGR** means in pixel space:
 `[129.1863, 104.7624, 93.5940]`.
