@@ -18,20 +18,28 @@ scikit-learn==1.4.*
 
 # --- Deep learning stack ---
 torch==2.2.2+cu118
-torchvision==0.17.2
-torchaudio==2.2.2
+torchvision==0.17.2+cu118
+torchaudio==2.2.2+cu118
 torchfile==0.1.*
 --extra-index-url https://download.pytorch.org/whl/cu118
 
 # --- Vision / models ---
 timm==1.0.*
 
-# --- Adversarial eval / attacks ---
+# --- Adversarial evaluation ---
 autoattack==0.1.*
 robustbench>=1.0,<2.0
 torchattacks==3.5.*
 
-# --- Optimization / DRO (FAAL) ---
+# --- Optimization / DRO / FAAL ---
 cvxpy==1.5.*
 ecos==2.0.*
 scs==3.2.*
+
+# --- Repo utilities (safe + required) ---
+GitPython==3.1.*
+filelock==3.13.*
+fsspec==2024.6.*
+wandb==0.22.*
+
+
