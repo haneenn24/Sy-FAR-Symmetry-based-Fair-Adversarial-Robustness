@@ -16,10 +16,11 @@ This repository provides the official implementation of **Sy-FAR**, a training a
 ├─ attacks/
 │  ├─ mask                    # Include physical glasses, stickers, masks, etc.
 │  ├─ autoattack.py           # AutoAttack evaluation (CIFAR-10/100)
-│  ├─ glass_attack.py         # eyeglass-frame attack
 │  ├─ facemask_attack.py      # grid level facemask-frame attack
+│  ├─ glass_attack.py         # eyeglass-frame attack
 │  └─ sticker_attack.py       # ROA as a standalone attack script
 │
+|─ datasets/                  # pubfig preprocessed dataset
 ├─ defenses/
 │  ├─ PGD.py                  # PGD utilities (training/eval helpers)
 │  └─ ROA.py                  # ROA-based adversarial training loop (targeted option)
@@ -33,11 +34,10 @@ This repository provides the official implementation of **Sy-FAR**, a training a
 │  ├─ vgg16.py                # VGG-Face convs + flexible FC; e2e/head-only; multiple inits
 │  └─ vit.py                  # ViT via timm ('vit_base_patch16_224')
 │
-├─ pretrained_models/
-│  └─ __init__.py             # place VGG_FACE.t7 here (or pass its path explicitly)
+├─ pretrained_models/         # standard training, ROA-based adversarial training, FAAL, SpecNorm, and our Sy-FAR models
 │
 ├─ training_schemes/
-│  ├─ baselines/              # room for additional baselines
+│  ├─ baselines/              # faal and specnorm
 │  ├─ adversarial.py          # adversarial training (ROA baseline)
 │  ├─ standard.py             # standard ERM training
 │  └─ syfar.py                # Sy-FAR: clean + ROA + symmetry penalty (+ optional FAAL)
