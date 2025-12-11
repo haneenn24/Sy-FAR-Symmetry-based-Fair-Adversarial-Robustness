@@ -14,11 +14,10 @@ This repository provides the official implementation of **Sy-FAR**, a training a
 ```
 .
 ├─ attacks/
-│  ├─ dataprepare             # Include physical glasses, stickers, masks, etc.
+│  ├─ mask                    # Include physical glasses, stickers, masks, etc.
 │  ├─ autoattack.py           # AutoAttack evaluation (CIFAR-10/100)
 │  ├─ glass_attack.py         # eyeglass-frame attack
-│  ├─ smooth_glassattack.py   # randomized smoothing vs glasses
-│  ├─ smooth_patch.py         # randomized smoothing vs learned patch
+│  ├─ facemask_attack.py      # grid level facemask-frame attack
 │  └─ sticker_attack.py       # ROA as a standalone attack script
 │
 ├─ defenses/
@@ -108,20 +107,64 @@ python attacks/autoattack.py \
   --epsilon 8 --normalization 01
 ```
 
-### 6) GlassAttack
+## 6) Glass Attack (Eyeglass Frame)
 
-```bash
-python glass_attack.py --model-checkpoint /path/to/model.pt --glass-mask-path ./attacks/dataprepare/silhouette.png --batch-size 64 --alpha 20 --iters 1 10 50 100 300 --restarts 1 --num-classes 8 --save-images --save-dir ./attack_outputs
-```
+### Untargeted Glass Attack
+python glass_attack.py \
+  --model-checkpoint /path/to/model.pt \
+  --glass-mask-path ./attacks/mask/eyeglass.png \
+  --batch-size 64 \
+  --alpha 20 \
+  --iters 1 10 50 100 300 \
+  --restarts 1 \
+  --num-classes 8 \
+  --save-images \
+  --save-dir ./attack_outputs/glass_untargeted
 
-### 7) Visualize fairness/robustness
-
-```bash
-python utils/plot_visual_metrics.py
-# writes: *_full_heatmap.png, *_upper_triangle_diff.png, *_upper_triangle_absdiff.png
-```
+### Targeted Glass Attack
+python glass_attack.py \
+  --model-checkpoint /path/to/model.pt \
+  --glass-mask-path ./attacks/mask/eyeglass.png \
+  --targeted \
+  --target-class 5 \
+  --batch-size 64 \
+  --alpha 20 \
+  --iters 100 \
+  --restarts 1 \
+  --num-classes 8 \
+  --save-images \
+  --save-dir ./attack_outputs/glass_targeted_class5
 
 ---
+
+## 7) Face Mask Attack (Grid-Level δ)
+
+### Untargeted Face Mask Attack
+python mask_attack.py \
+  --model-checkpoint /path/to/model.pt \
+  --mask-path ./attacks/mask/facemask.png \
+  --batch-size 64 \
+  --alpha 20 \
+  --iters 50 100 200 \
+  --restarts 1 \
+  --num-classes 8 \
+  --save-images \
+  --save-dir ./attack_outputs/mask_untargeted
+
+### Targeted Face Mask Attack
+python mask_attack.py \
+  --model-checkpoint /path/to/model.pt \
+  --mask-path ./attacks/mask/facemask.png \
+  --targeted \
+  --target-class 3 \
+  --batch-size 64 \
+  --alpha 20 \
+  --iters 200 \
+  --restarts 1 \
+  --num-classes 8 \
+  --save-images \
+  --save-dir ./attack_outputs/mask_targeted_class3
+
 
 ## Backbones
 
@@ -131,7 +174,7 @@ python utils/plot_visual_metrics.py
   * training mode: end-to-end or head-only,
   * several head initializations (xavier/kaiming/trunc. normal, etc.).
 * **ResNet** (`models/resnet.py`): ResNet18/34/50 variants.
-* **ViT** (`models/vit.py`): `timm.create_model('vit_base_patch16_224', pretrained=True)`.
+* **ViT** (`models/vit.py`)
 
 ---
 
